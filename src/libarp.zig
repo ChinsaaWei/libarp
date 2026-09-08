@@ -1,7 +1,7 @@
 const std = @import("std");
 const header = @import("header");
 pub const packer = @import("packer");
-const unpack = @import("unpacker");
+pub const unpacker = @import("unpacker");
 
 test "packer.write writes header, info and data in order" {
     const info = "name = \"demo\"\n";
@@ -22,4 +22,38 @@ test "packer.write writes header, info and data in order" {
     try std.testing.expectEqualSlices(u8, &header.Magic, buf[0..4]);
     try std.testing.expectEqualSlices(u8, info, buf[64 .. 64 + info.len]);
     try std.testing.expectEqualSlices(u8, data, buf[64 + info.len ..]);
+}
+
+test "packer/unpacker roundtrip" {
+    const info = "name = \"demo\"\n";
+    const data = "payload-bytes";
+    const total = 64 + info.len + data.len;
+
+    const bytes_packed = try std.testing.allocator.alloc(u8, total);
+    defer std.testing.allocator.free(bytes_packed);
+
+    var w1 = std.Io.Writer.fixed(bytes_packed);
+    var src = std.Io.Reader.fixed(data);
+    _ = try packer.write(&w1, info, &src, .{});
+
+    const data_out = try std.testing.allocator.alloc(u8, data.len);
+    defer std.testing.allocator.free(data_out);
+
+    var r2 = std.Io.Reader.fixed(bytes_packed[0..w1.end]);
+    var w2 = std.Io.Writer.fixed(data_out);
+    const res = try unpacker.read(std.testing.allocator, &w2, &r2);
+    defer std.testing.allocator.free(res.info);
+
+    try std.testing.expectEqual(@as(u32, @intCast(info.len)), res.header.info_size);
+    try std.testing.expectEqualSlices(u8, info, res.info);
+    try std.testing.expectEqual(@as(usize, data.len), w2.end);
+    try std.testing.expectEqualSlices(u8, data, data_out);
+}
+
+test "unpacker rejects bad magic" {
+    const garbage = [_]u8{'X'} ** 64;
+    var r = std.Io.Reader.fixed(&garbage);
+    var empty: [0]u8 = .{};
+    var w = std.Io.Writer.fixed(&empty);
+    try std.testing.expectError(error.BadMagic, unpacker.read(std.testing.allocator, &w, &r));
 }

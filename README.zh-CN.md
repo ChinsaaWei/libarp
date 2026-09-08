@@ -2,9 +2,9 @@
 
 [English](README.md) | 简体中文
 
-ARP（Advanced Release Package）的写入与读取库。
+一个用于读写 ARP（Advanced Release Package）格式的库。
 
-## ARP 格式说明
+## ARP 文件格式
 
 ```
 ┌────────────────────────────────────────┐
@@ -26,13 +26,13 @@ ARP（Advanced Release Package）的写入与读取库。
 └────────────────────────────────────────┘
 ```
 
-## 特性
+## 功能
 
-- 解析 64B 头（小端序，带边界校验）
+- 解析 64 字节文件头
 - 将 Header 序列化为字节数组
-- 打包：Header + .info + 数据 → `.arp` 文件
-- 解包：`.arp` 文件 → Header + .info + 数据
-- 未来将支持签名与完整性校验
+- 打包：把 Header、`.info` 和数据段组装成 `.arp` 文件
+- 解包：从 `.arp` 文件还原 Header、`.info` 和数据段
+- 后续支持签名与完整性校验
 
 ## 许可证
 
