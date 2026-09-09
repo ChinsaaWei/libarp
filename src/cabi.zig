@@ -1,5 +1,6 @@
 const std = @import("std");
 const header = @import("header");
+const verifier = @import("verifier");
 const packer = @import("packer");
 const unpacker = @import("unpacker");
 
@@ -18,6 +19,7 @@ pub const Err = enum(c_int) {
     truncated = 7,
     open_failed = 8,
     io_failed = 9,
+    nonzero_reserved = 10,
     unknown = 99,
 };
 
@@ -38,7 +40,10 @@ fn codeOf(e: anyerror) Err {
         error.Overflow => .overflow,
         error.BufferTooSmall => .buffer_too_small,
         error.BadMagic => .bad_magic,
-        error.BadVersion => .bad_version,
+        error.UnsupportedVersion => .bad_version,
+        error.SigFieldNonZero => .nonzero_reserved,
+        error.ChecksumNonZero => .nonzero_reserved,
+        error.ReservedNonZero => .nonzero_reserved,
         error.Truncated => .truncated,
         error.OpenFailed => .open_failed,
         error.IOFailed => .io_failed,
@@ -139,7 +144,7 @@ export fn arp_header_parse(
     var arr: [header.HeaderSize]u8 = undefined;
     @memcpy(&arr, b[0..header.HeaderSize]);
     const h = header.Header.parse(arr) catch |e| return codeOf(e);
-    if (h.version != 1) return .bad_version;
+    verifier.verify(h) catch |e| return codeOf(e);
 
     o.* = .{
         .version = h.version,
@@ -173,7 +178,7 @@ fn unpackStreamInternal(arp_path: [*:0]const u8, data_out_path: [*:0]const u8) !
         off += n;
     }
     const h = try header.Header.parse(hdr_bytes);
-    if (h.version != 1) return error.BadVersion;
+    try verifier.verify(h);
     if (h.data_offset < header.HeaderSize) return error.Truncated;
 
     const fout = c.fopen(data_out_path, "wb") orelse return error.OpenFailed;
@@ -303,6 +308,14 @@ test "cabi arp_header_parse validates" {
     try std.testing.expectEqual(Err.bad_version, arp_header_parse(&bv_bytes, bv_bytes.len, &ch));
 
     try std.testing.expectEqual(Err.bad_arg, arp_header_parse(null, 0, &ch));
+}
+
+test "cabi arp_header_parse rejects nonzero reserved" {
+    var h = validHeader();
+    h.sig_size = 1;
+    const bytes = h.serialize();
+    var ch: CHeader = undefined;
+    try std.testing.expectEqual(Err.nonzero_reserved, arp_header_parse(&bytes, bytes.len, &ch));
 }
 
 test "cabi arp_unpack_stream extracts data" {

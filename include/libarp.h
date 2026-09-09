@@ -19,6 +19,7 @@ enum arp_err {
     ARP_ERR_TRUNCATED = 7,
     ARP_ERR_OPEN_FAILED = 8,
     ARP_ERR_IO_FAILED = 9,
+    ARP_ERR_NONZERO_RESERVED = 10,
     ARP_ERR_UNKNOWN = 99,
 };
 

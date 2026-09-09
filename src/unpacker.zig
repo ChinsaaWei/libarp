@@ -1,5 +1,6 @@
 const std = @import("std");
 const header = @import("header");
+const verifier = @import("verifier");
 
 pub const UnpackResult = struct {
     header: header.Header,
@@ -14,6 +15,7 @@ pub fn read(
     var header_bytes: [header.HeaderSize]u8 = undefined;
     try r.readSliceAll(&header_bytes);
     const h = try header.Header.parse(header_bytes);
+    try verifier.verify(h);
 
     const info = try allocator.alloc(u8, h.info_size);
     errdefer allocator.free(info);
