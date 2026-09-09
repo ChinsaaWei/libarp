@@ -1,0 +1,12 @@
+.{
+    .name = .libarp,
+    .version = "0.1.0",
+    .fingerprint = 0xcfe08f69137e2b49,
+    .minimum_zig_version = "0.16.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "include",
+    },
+}

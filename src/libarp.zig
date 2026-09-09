@@ -1,5 +1,5 @@
 const std = @import("std");
-const header = @import("header");
+pub const header = @import("header");
 pub const packer = @import("packer");
 pub const unpacker = @import("unpacker");
 
