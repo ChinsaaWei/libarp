@@ -1,6 +1,5 @@
 const std = @import("std");
 const header = @import("header");
-const verifier = @import("verifier");
 const packer = @import("packer");
 const unpacker = @import("unpacker");
 
@@ -20,6 +19,13 @@ pub const Err = enum(c_int) {
     open_failed = 8,
     io_failed = 9,
     nonzero_reserved = 10,
+    bad_checksum = 11,
+    bad_signature = 12,
+    unsigned = 13,
+    untrusted_key = 14,
+    data_offset_mismatch = 15,
+    sig_size_bad = 16,
+    sig_out_of_bounds = 17,
     unknown = 99,
 };
 
@@ -41,12 +47,13 @@ fn codeOf(e: anyerror) Err {
         error.BufferTooSmall => .buffer_too_small,
         error.BadMagic => .bad_magic,
         error.UnsupportedVersion => .bad_version,
-        error.SigFieldNonZero => .nonzero_reserved,
-        error.ChecksumNonZero => .nonzero_reserved,
-        error.ReservedNonZero => .nonzero_reserved,
         error.Truncated => .truncated,
         error.OpenFailed => .open_failed,
         error.IOFailed => .io_failed,
+        error.ReservedNonZero => .nonzero_reserved,
+        error.DataOffsetMismatch => .data_offset_mismatch,
+        error.SigSizeBad => .sig_size_bad,
+        error.SigOutOfBounds => .sig_out_of_bounds,
         else => .unknown,
     };
 }
@@ -144,7 +151,7 @@ export fn arp_header_parse(
     var arr: [header.HeaderSize]u8 = undefined;
     @memcpy(&arr, b[0..header.HeaderSize]);
     const h = header.Header.parse(arr) catch |e| return codeOf(e);
-    verifier.verify(h) catch |e| return codeOf(e);
+    h.validateFormat() catch |e| return codeOf(e);
 
     o.* = .{
         .version = h.version,
@@ -170,6 +177,12 @@ fn unpackStreamInternal(arp_path: [*:0]const u8, data_out_path: [*:0]const u8) !
     const fin = c.fopen(arp_path, "rb") orelse return error.OpenFailed;
     defer _ = c.fclose(fin);
 
+    if (c.fseek(fin, 0, c.SEEK_END) != 0) return error.IOFailed;
+    const ft = c.ftell(fin);
+    if (ft < 0) return error.IOFailed;
+    const file_size: u64 = @intCast(ft);
+    if (c.fseek(fin, 0, c.SEEK_SET) != 0) return error.IOFailed;
+
     var hdr_bytes: [header.HeaderSize]u8 = undefined;
     var off: usize = 0;
     while (off < hdr_bytes.len) {
@@ -178,8 +191,8 @@ fn unpackStreamInternal(arp_path: [*:0]const u8, data_out_path: [*:0]const u8) !
         off += n;
     }
     const h = try header.Header.parse(hdr_bytes);
-    try verifier.verify(h);
-    if (h.data_offset < header.HeaderSize) return error.Truncated;
+    try h.validateFormat();
+    try h.validateBounds(file_size);
 
     const fout = c.fopen(data_out_path, "wb") orelse return error.OpenFailed;
     defer _ = c.fclose(fout);
@@ -192,6 +205,18 @@ fn unpackStreamInternal(arp_path: [*:0]const u8, data_out_path: [*:0]const u8) !
         const n: usize = @intCast(c.fread(&buf, 1, want, fin));
         if (n == 0) return error.Truncated;
         skip -= n;
+    }
+
+    if (h.sig_size != 0) {
+        var remaining: u64 = h.sig_offset - h.data_offset;
+        while (remaining > 0) {
+            const want: usize = @intCast(@min(remaining, buf.len));
+            const n: usize = @intCast(c.fread(&buf, 1, want, fin));
+            if (n == 0) return error.Truncated;
+            if (@as(usize, @intCast(c.fwrite(&buf, 1, n, fout))) != n) return error.IOFailed;
+            remaining -= n;
+        }
+        return;
     }
 
     while (true) {
@@ -312,7 +337,7 @@ test "cabi arp_header_parse validates" {
 
 test "cabi arp_header_parse rejects nonzero reserved" {
     var h = validHeader();
-    h.sig_size = 1;
+    h.reserved[0] = 1;
     const bytes = h.serialize();
     var ch: CHeader = undefined;
     try std.testing.expectEqual(Err.nonzero_reserved, arp_header_parse(&bytes, bytes.len, &ch));

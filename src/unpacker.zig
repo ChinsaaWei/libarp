@@ -15,16 +15,27 @@ pub fn read(
     var header_bytes: [header.HeaderSize]u8 = undefined;
     try r.readSliceAll(&header_bytes);
     const h = try header.Header.parse(header_bytes);
-    try verifier.verify(h);
+    try verifier.verifyFormat(h);
 
     const info = try allocator.alloc(u8, h.info_size);
     errdefer allocator.free(info);
     try r.readSliceAll(info);
 
-    const consumed: u64 = header.HeaderSize + h.info_size;
-    if (h.data_offset < consumed) return error.BadDataOffset;
-    try r.discardAll64(h.data_offset - consumed);
-
-    _ = try r.streamRemaining(w);
+    if (h.sig_size != 0) {
+        try streamExact(w, r, h.sig_offset - h.data_offset);
+    } else {
+        _ = try r.streamRemaining(w);
+    }
     return .{ .header = h, .info = info };
+}
+
+fn streamExact(w: *std.Io.Writer, r: *std.Io.Reader, len: u64) !void {
+    var remaining = len;
+    var buf: [64 * 1024]u8 = undefined;
+    while (remaining > 0) {
+        const chunk: usize = @intCast(@min(remaining, buf.len));
+        try r.readSliceAll(buf[0..chunk]);
+        try w.writeAll(buf[0..chunk]);
+        remaining -= chunk;
+    }
 }

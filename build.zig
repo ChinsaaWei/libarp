@@ -51,7 +51,6 @@ pub fn build(b: *std.Build) void {
     cabi_mod.addImport("header", header);
     cabi_mod.addImport("packer", packer);
     cabi_mod.addImport("unpacker", unpacker);
-    cabi_mod.addImport("verifier", verifier);
 
     const lib_mod = b.createModule(.{
         .root_source_file = b.path("src/libarp.zig"),
