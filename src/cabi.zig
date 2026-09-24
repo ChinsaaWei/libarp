@@ -2,6 +2,9 @@ const std = @import("std");
 const header = @import("header");
 const packer = @import("packer");
 const unpacker = @import("unpacker");
+const checksum = @import("checksum");
+
+const Sha256 = std.crypto.hash.sha2.Sha256;
 
 const c = @cImport({
     @cInclude("stdio.h");
@@ -54,6 +57,7 @@ fn codeOf(e: anyerror) Err {
         error.DataOffsetMismatch => .data_offset_mismatch,
         error.SigSizeBad => .sig_size_bad,
         error.SigOutOfBounds => .sig_out_of_bounds,
+        error.BadChecksum => .bad_checksum,
         else => .unknown,
     };
 }
@@ -89,8 +93,7 @@ fn packMemInternal(info: []const u8, data: []const u8, out: []u8) !void {
     const total = try computeTotal(info.len, data.len);
     if (out.len < total) return error.BufferTooSmall;
     var w = std.Io.Writer.fixed(out[0..total]);
-    var r = std.Io.Reader.fixed(data);
-    _ = try packer.write(&w, info, &r, .{});
+    _ = try packer.write(&w, info, data, .{});
 }
 
 export fn arp_pack_stream(
@@ -125,6 +128,9 @@ fn packStreamInternal(out_path: [*:0]const u8, info: []const u8, data_path: [*:0
     if (info.len > 0 and @as(usize, @intCast(c.fwrite(info.ptr, 1, info.len, fout))) != info.len)
         return error.IOFailed;
 
+    var sha = Sha256.init(.{});
+    sha.update(info);
+
     const fin = c.fopen(data_path, "rb") orelse return error.OpenFailed;
     defer _ = c.fclose(fin);
 
@@ -133,10 +139,15 @@ fn packStreamInternal(out_path: [*:0]const u8, info: []const u8, data_path: [*:0
         const n: usize = @intCast(c.fread(&buf, 1, buf.len, fin));
         if (n == 0) {
             if (c.ferror(fin) != 0) return error.IOFailed;
-            return;
+            break;
         }
         if (@as(usize, @intCast(c.fwrite(&buf, 1, n, fout))) != n) return error.IOFailed;
+        sha.update(buf[0..n]);
     }
+
+    const got = sha.finalResult();
+    if (c.fseek(fout, 30, c.SEEK_SET) != 0) return error.IOFailed;
+    if (@as(usize, @intCast(c.fwrite(&got, 1, 8, fout))) != 8) return error.IOFailed;
 }
 
 export fn arp_header_parse(
@@ -197,6 +208,7 @@ fn unpackStreamInternal(arp_path: [*:0]const u8, data_out_path: [*:0]const u8) !
     const fout = c.fopen(data_out_path, "wb") orelse return error.OpenFailed;
     defer _ = c.fclose(fout);
 
+    var sha = Sha256.init(.{});
     var buf: [64 * 1024]u8 = undefined;
 
     var skip: u64 = h.data_offset - header.HeaderSize;
@@ -204,6 +216,7 @@ fn unpackStreamInternal(arp_path: [*:0]const u8, data_out_path: [*:0]const u8) !
         const want: usize = @intCast(@min(skip, buf.len));
         const n: usize = @intCast(c.fread(&buf, 1, want, fin));
         if (n == 0) return error.Truncated;
+        sha.update(buf[0..n]);
         skip -= n;
     }
 
@@ -214,18 +227,24 @@ fn unpackStreamInternal(arp_path: [*:0]const u8, data_out_path: [*:0]const u8) !
             const n: usize = @intCast(c.fread(&buf, 1, want, fin));
             if (n == 0) return error.Truncated;
             if (@as(usize, @intCast(c.fwrite(&buf, 1, n, fout))) != n) return error.IOFailed;
+            sha.update(buf[0..n]);
             remaining -= n;
         }
-        return;
+    } else {
+        while (true) {
+            const n: usize = @intCast(c.fread(&buf, 1, buf.len, fin));
+            if (n == 0) {
+                if (c.ferror(fin) != 0) return error.IOFailed;
+                break;
+            }
+            if (@as(usize, @intCast(c.fwrite(&buf, 1, n, fout))) != n) return error.IOFailed;
+            sha.update(buf[0..n]);
+        }
     }
 
-    while (true) {
-        const n: usize = @intCast(c.fread(&buf, 1, buf.len, fin));
-        if (n == 0) {
-            if (c.ferror(fin) != 0) return error.IOFailed;
-            return;
-        }
-        if (@as(usize, @intCast(c.fwrite(&buf, 1, n, fout))) != n) return error.IOFailed;
+    if (!checksum.isZero(h.checksum)) {
+        const got = sha.finalResult();
+        if (!std.mem.eql(u8, &h.checksum, got[0..8])) return error.BadChecksum;
     }
 }
 

@@ -1,5 +1,6 @@
 const std = @import("std");
 pub const header = @import("header");
+pub const checksum = @import("checksum");
 pub const verifier = @import("verifier");
 pub const packer = @import("packer");
 pub const unpacker = @import("unpacker");
@@ -13,9 +14,8 @@ test "packer.write writes header, info and data in order" {
     defer std.testing.allocator.free(buf);
 
     var w = std.Io.Writer.fixed(buf);
-    var r = std.Io.Reader.fixed(data);
 
-    const h = try packer.write(&w, info, &r, .{});
+    const h = try packer.write(&w, info, data, .{});
 
     try std.testing.expectEqual(@as(u32, @intCast(info.len)), h.info_size);
     try std.testing.expectEqual(@as(u64, @intCast(64 + info.len)), h.data_offset);
@@ -34,8 +34,7 @@ test "packer/unpacker roundtrip" {
     defer std.testing.allocator.free(bytes_packed);
 
     var w1 = std.Io.Writer.fixed(bytes_packed);
-    var src = std.Io.Reader.fixed(data);
-    _ = try packer.write(&w1, info, &src, .{});
+    _ = try packer.write(&w1, info, data, .{});
 
     const data_out = try std.testing.allocator.alloc(u8, data.len);
     defer std.testing.allocator.free(data_out);

@@ -3,11 +3,13 @@ const std = @import("std");
 fn setupImports(
     root: *std.Build.Module,
     header: *std.Build.Module,
+    checksum: *std.Build.Module,
     packer: *std.Build.Module,
     unpacker: *std.Build.Module,
     verifier: *std.Build.Module,
 ) void {
     root.addImport("header", header);
+    root.addImport("checksum", checksum);
     root.addImport("packer", packer);
     root.addImport("unpacker", unpacker);
     root.addImport("verifier", verifier);
@@ -19,6 +21,11 @@ pub fn build(b: *std.Build) void {
 
     const header = b.createModule(.{
         .root_source_file = b.path("src/header.zig"),
+    });
+    const checksum = b.createModule(.{
+        .root_source_file = b.path("src/checksum.zig"),
+        .target = target,
+        .optimize = optimize,
     });
     const packer = b.createModule(.{
         .root_source_file = b.path("src/packer.zig"),
@@ -32,15 +39,17 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     packer.addImport("header", header);
+    packer.addImport("checksum", checksum);
     unpacker.addImport("header", header);
     unpacker.addImport("verifier", verifier);
+    unpacker.addImport("checksum", checksum);
     verifier.addImport("header", header);
 
     const libarp_mod = b.addModule("libarp", .{
         .root_source_file = b.path("src/libarp.zig"),
         .target = target,
     });
-    setupImports(libarp_mod, header, packer, unpacker, verifier);
+    setupImports(libarp_mod, header, checksum, packer, unpacker, verifier);
 
     const cabi_mod = b.createModule(.{
         .root_source_file = b.path("src/cabi.zig"),
@@ -49,6 +58,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     cabi_mod.addImport("header", header);
+    cabi_mod.addImport("checksum", checksum);
     cabi_mod.addImport("packer", packer);
     cabi_mod.addImport("unpacker", unpacker);
 
@@ -57,7 +67,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    setupImports(lib_mod, header, packer, unpacker, verifier);
+    setupImports(lib_mod, header, checksum, packer, unpacker, verifier);
 
     const static_lib = b.addLibrary(.{
         .name = "arp",
