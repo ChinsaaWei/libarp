@@ -7,12 +7,14 @@ fn setupImports(
     packer: *std.Build.Module,
     unpacker: *std.Build.Module,
     verifier: *std.Build.Module,
+    signature: *std.Build.Module,
 ) void {
     root.addImport("header", header);
     root.addImport("checksum", checksum);
     root.addImport("packer", packer);
     root.addImport("unpacker", unpacker);
     root.addImport("verifier", verifier);
+    root.addImport("signature", signature);
 }
 
 pub fn build(b: *std.Build) void {
@@ -38,18 +40,24 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const signature = b.createModule(.{
+        .root_source_file = b.path("src/signature.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
     packer.addImport("header", header);
     packer.addImport("checksum", checksum);
     unpacker.addImport("header", header);
     unpacker.addImport("verifier", verifier);
     unpacker.addImport("checksum", checksum);
     verifier.addImport("header", header);
+    signature.addImport("header", header);
 
     const libarp_mod = b.addModule("libarp", .{
         .root_source_file = b.path("src/libarp.zig"),
         .target = target,
     });
-    setupImports(libarp_mod, header, checksum, packer, unpacker, verifier);
+    setupImports(libarp_mod, header, checksum, packer, unpacker, verifier, signature);
 
     const cabi_mod = b.createModule(.{
         .root_source_file = b.path("src/cabi.zig"),
@@ -67,7 +75,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    setupImports(lib_mod, header, checksum, packer, unpacker, verifier);
+    setupImports(lib_mod, header, checksum, packer, unpacker, verifier, signature);
 
     const static_lib = b.addLibrary(.{
         .name = "arp",

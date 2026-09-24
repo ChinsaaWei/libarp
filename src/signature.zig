@@ -1,0 +1,64 @@
+const std = @import("std");
+const header = @import("header");
+
+const Ed25519 = std.crypto.sign.Ed25519;
+const Sha256 = std.crypto.hash.sha2.Sha256;
+
+pub const Size = header.SignatureSize;
+pub const Magic = [4]u8{ 'A', 'R', 'P', 'S' };
+
+pub const Status = enum { unsigned, invalid, valid };
+
+pub const Result = struct {
+    status: Status,
+    key_id: ?[8]u8 = null,
+};
+
+pub const Blob = struct {
+    key_id: [8]u8,
+    pubkey: [32]u8,
+    signature: [64]u8,
+};
+
+pub fn keyId(pubkey: [32]u8) [8]u8 {
+    var full: [32]u8 = undefined;
+    Sha256.hash(&pubkey, &full, .{});
+    return full[0..8].*;
+}
+
+pub fn parse(bytes: []const u8) !Blob {
+    if (bytes.len < Size) return error.Truncated;
+    if (!std.mem.eql(u8, bytes[0..4], &Magic)) return error.BadSignature;
+    if (bytes[4] != 1) return error.BadSignature;
+
+    var blob: Blob = undefined;
+    @memcpy(&blob.key_id, bytes[5..13]);
+    @memcpy(&blob.pubkey, bytes[13..45]);
+    @memcpy(&blob.signature, bytes[45..109]);
+
+    if (!std.mem.eql(u8, &blob.key_id, &keyId(blob.pubkey))) {
+        return error.BadSignature;
+    }
+    return blob;
+}
+
+pub fn verifyBlob(blob: []const u8, message: []const u8) Result {
+    const parsed = parse(blob) catch return .{ .status = .invalid };
+    const pk = Ed25519.PublicKey.fromBytes(parsed.pubkey) catch
+        return .{ .status = .invalid };
+    const sig = Ed25519.Signature.fromBytes(parsed.signature);
+    sig.verify(message, pk) catch return .{ .status = .invalid };
+    return .{ .status = .valid, .key_id = parsed.key_id };
+}
+
+pub fn verify(file: []const u8) Result {
+    const h = header.parseChecked(file, file.len) catch return .{ .status = .invalid };
+    if (h.sig_size == 0) return .{ .status = .unsigned };
+
+    const start: usize = @intCast(h.sig_offset);
+    return verifyBlob(file[start .. start + Size], file[0..start]);
+}
+
+pub fn verifyDetached(blob: []const u8, data: []const u8) Result {
+    return verifyBlob(blob, data);
+}

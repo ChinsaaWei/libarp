@@ -2,6 +2,7 @@ const std = @import("std");
 pub const header = @import("header");
 pub const checksum = @import("checksum");
 pub const verifier = @import("verifier");
+pub const signature = @import("signature");
 pub const packer = @import("packer");
 pub const unpacker = @import("unpacker");
 
